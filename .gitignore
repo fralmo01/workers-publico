@@ -52,6 +52,7 @@ build/Release
 
 node_modules/
 jspm_packages/
+db/
 
 # Snowpack dependency directory (https://snowpack.dev/)
 
@@ -165,3 +166,9 @@ dist
 .env*
 !.env.example
 .wrangler/
+.claude/
+
+# Documentación interna
+CLAUDE.md
+estructura.md
+PLAN_VERSION.md

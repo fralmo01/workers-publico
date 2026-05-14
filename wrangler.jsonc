@@ -13,7 +13,28 @@
 	"upload_source_maps": true,
 	"compatibility_flags": [
 		"nodejs_compat"
-	]
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "veri-on-db",
+			"database_id": "329b8942-3eaa-4249-aaa9-29dbd91357fc"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "BUCKET",
+			"bucket_name": "prolink-uploads"
+		}
+	],
+	// En producción, usa: wrangler secret put JWT_SECRET
+	// En local, pon el valor real en .dev.vars (gitignored)
+	// Secretos Google OAuth: wrangler secret put GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+	// Para local: añadir GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET y FRONTEND_URL en .dev.vars
+	// JWT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET → wrangler secret put <name>
+	"vars": {
+		"FRONTEND_URL": "http://localhost:5173"
+	}
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
