@@ -13,7 +13,6 @@ const TRANSICIONES: Record<EstadoColaboracion, EstadoColaboracion[]> = {
 
 const router = new Hono<HonoEnv>();
 
-// GET /api/colaboraciones — listar del usuario autenticado (empresa o técnico)
 router.get('/', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const rol = c.get('rol');
@@ -35,7 +34,6 @@ router.get('/', authMiddleware, async (c) => {
   }
 });
 
-// POST /api/colaboraciones — crear (solo EMPRESA)
 router.post('/', authMiddleware, async (c) => {
   if (c.get('rol') !== 'EMPRESA') return err(c, 'Solo empresas pueden crear colaboraciones', 403);
   const userId = c.get('userId');
@@ -85,7 +83,6 @@ router.post('/', authMiddleware, async (c) => {
         return err(c, 'No hay plazas disponibles en esta convocatoria', 400);
       }
 
-      // Batch atómico: crear colaboración + ocupar plaza
       await c.env.DB.batch([
         c.env.DB
           .prepare(
@@ -120,7 +117,6 @@ router.post('/', authMiddleware, async (c) => {
   }
 });
 
-// GET /api/colaboraciones/:id — detalle (solo empresa o técnico involucrado)
 router.get('/:id', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const id = c.req.param('id');
@@ -142,7 +138,6 @@ router.get('/:id', authMiddleware, async (c) => {
   }
 });
 
-// PATCH /api/colaboraciones/:id/estado — cambiar estado (empresa o técnico involucrado)
 router.patch('/:id/estado', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const id = c.req.param('id');
@@ -178,11 +173,24 @@ router.patch('/:id/estado', authMiddleware, async (c) => {
     const now = Math.floor(Date.now() / 1000);
     const fechaFin = nuevo === 'FINALIZADA' || nuevo === 'CANCELADA' ? now : null;
 
-    // TODO Fase 4: al pasar a FINALIZADA, disparar creación de constancia y solicitud de calificación
-    await c.env.DB
-      .prepare('UPDATE colaboracion SET estado = ?, fecha_fin = ? WHERE id = ?')
-      .bind(nuevo, fechaFin, id)
-      .run();
+    const stmts: ReturnType<typeof c.env.DB.prepare>[] = [
+      c.env.DB
+        .prepare('UPDATE colaboracion SET estado = ?, fecha_fin = ? WHERE id = ?')
+        .bind(nuevo, fechaFin, id),
+    ];
+
+    if (nuevo === 'FINALIZADA') {
+      stmts.push(
+        c.env.DB
+          .prepare('UPDATE perfil_tecnico SET total_colaboraciones = total_colaboraciones + 1 WHERE usuario_id = ?')
+          .bind(colab.tecnico_id),
+        c.env.DB
+          .prepare('UPDATE perfil_empresa SET total_contrataciones = total_contrataciones + 1 WHERE usuario_id = ?')
+          .bind(colab.empresa_id),
+      );
+    }
+
+    await c.env.DB.batch(stmts);
 
     return ok(c, { id, estado: nuevo, fecha_fin: fechaFin });
   } catch {

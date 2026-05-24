@@ -7,7 +7,6 @@ import { ok, err } from '../lib/responses';
 
 const ROLES_REGISTRABLES: Rol[] = ['EMPRESA', 'TECNICO'];
 const PLATAFORMAS: Plataforma[] = ['WEB', 'ANDROID', 'IOS'];
-// Hash ficticio para mantener tiempo constante cuando el email no existe (evitar timing oracle)
 const DUMMY_HASH = '100000:AAAAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 const router = new Hono<HonoEnv>();
@@ -46,7 +45,6 @@ router.post('/register', async (c) => {
     const now = Math.floor(Date.now() / 1000);
     const hash = await hashPassword(password as string);
 
-    // Crear usuario + perfil en un batch atómico
     const perfilStmt =
       rolValue === 'EMPRESA'
         ? c.env.DB
@@ -105,7 +103,6 @@ router.post('/login', async (c) => {
         activo: 0 | 1;
       }>();
 
-    // Siempre ejecutar PBKDF2 para mantener tiempo constante (evitar timing oracle)
     const hashToVerify = usuario?.password_hash ?? DUMMY_HASH;
     const valid = await verifyPassword(password, hashToVerify);
     if (!usuario || !usuario.password_hash) {
@@ -158,8 +155,6 @@ router.post('/logout', authMiddleware, async (c) => {
   }
 });
 
-// TODO(seguridad): implementar refresh token rotation antes de producción
-// (emitir nuevo refreshToken + revocar el anterior en cada llamada)
 router.post('/refresh', async (c) => {
   let body: Record<string, unknown>;
   try {
@@ -205,16 +200,14 @@ router.post('/refresh', async (c) => {
   }
 });
 
-// ── Google OAuth ────────────────────────────────────────────────────────────
 
 const GOOGLE_SCOPES = 'openid email profile';
 
-// GET /api/auth/google — devuelve la URL de autorización de Google
 router.get('/google', (c) => {
   const clientId = c.env.GOOGLE_CLIENT_ID;
   if (!clientId) return err(c, 'Google OAuth no configurado', 503);
 
-  const redirectUri = `${new URL(c.req.url).origin}/api/auth/google/callback`;
+  const redirectUri = `${c.env.WORKER_BASE_URL}/api/auth/google/callback`;
   const state = crypto.randomUUID(); // CSRF token básico
 
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
@@ -228,7 +221,6 @@ router.get('/google', (c) => {
   return ok(c, { url: url.toString(), state });
 });
 
-// GET /api/auth/google/callback — callback tras autenticación con Google
 router.get('/google/callback', async (c) => {
   const clientId     = c.env.GOOGLE_CLIENT_ID;
   const clientSecret = c.env.GOOGLE_CLIENT_SECRET;
@@ -244,9 +236,8 @@ router.get('/google/callback', async (c) => {
   }
 
   try {
-    const redirectUri = `${new URL(c.req.url).origin}/api/auth/google/callback`;
+    const redirectUri = `${c.env.WORKER_BASE_URL}/api/auth/google/callback`;
 
-    // Intercambiar código por tokens
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -260,7 +251,9 @@ router.get('/google/callback', async (c) => {
     });
 
     if (!tokenRes.ok) {
-      return Response.redirect(`${frontendUrl}/login?oauth_error=token_exchange_failed`, 302);
+      const googleErr = await tokenRes.json().catch(() => ({})) as Record<string, unknown>;
+      console.error('[OAuth] token_exchange error:', JSON.stringify(googleErr));
+      return Response.redirect(`${frontendUrl}/login?oauth_error=${encodeURIComponent((googleErr.error as string) ?? 'token_exchange_failed')}`, 302);
     }
 
     const tokens = await tokenRes.json() as { id_token?: string; access_token?: string };
@@ -286,38 +279,32 @@ router.get('/google/callback', async (c) => {
 
     const emailNorm = email.toLowerCase().trim();
 
-    // Buscar usuario por google_sub o email
     let usuario = await c.env.DB
       .prepare('SELECT id, email, rol, activo FROM usuario WHERE google_sub = ?')
       .bind(googleSub)
       .first<{ id: string; email: string; rol: Rol; activo: 0 | 1 }>();
 
     if (!usuario) {
-      // Buscar por email (puede vincular cuenta existente)
       usuario = await c.env.DB
         .prepare('SELECT id, email, rol, activo FROM usuario WHERE email = ?')
         .bind(emailNorm)
         .first<{ id: string; email: string; rol: Rol; activo: 0 | 1 }>();
 
       if (usuario) {
-        // Vincular google_sub al usuario existente
         await c.env.DB.prepare('UPDATE usuario SET google_sub = ? WHERE id = ?').bind(googleSub, usuario.id).run();
       }
     }
 
+    let isNew = false;
     if (!usuario) {
-      // Nuevo usuario — por defecto rol TECNICO (puede cambiar en onboarding)
       const id = crypto.randomUUID();
       const now = Math.floor(Date.now() / 1000);
-      await c.env.DB.batch([
-        c.env.DB
-          .prepare(`INSERT INTO usuario (id, email, password_hash, google_sub, rol, tema, idioma, fecha_registro, activo, email_verificado) VALUES (?, ?, NULL, ?, 'TECNICO', 'CLARO', 'ES', ?, 1, 1)`)
-          .bind(id, emailNorm, googleSub, now),
-        c.env.DB
-          .prepare('INSERT INTO perfil_tecnico (usuario_id, nombre_completo) VALUES (?, ?)')
-          .bind(id, emailNorm.split('@')[0]),
-      ]);
+      await c.env.DB
+        .prepare(`INSERT INTO usuario (id, email, password_hash, google_sub, rol, tema, idioma, fecha_registro, activo, email_verificado) VALUES (?, ?, NULL, ?, 'TECNICO', 'CLARO', 'ES', ?, 1, 1)`)
+        .bind(id, emailNorm, googleSub, now)
+        .run();
       usuario = { id, email: emailNorm, rol: 'TECNICO', activo: 1 };
+      isNew = true;
     }
 
     if (!usuario.activo) {
@@ -351,10 +338,142 @@ router.get('/google/callback', async (c) => {
     callbackUrl.searchParams.set('id', usuario.id);
     callbackUrl.searchParams.set('email', usuario.email);
     callbackUrl.searchParams.set('rol', usuario.rol);
+    if (isNew) callbackUrl.searchParams.set('is_new', '1');
 
     return Response.redirect(callbackUrl.toString(), 302);
   } catch {
     return Response.redirect(`${frontendUrl}/login?oauth_error=server_error`, 302);
+  }
+});
+
+router.delete('/me', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    await c.env.DB.batch([
+      c.env.DB
+        .prepare('UPDATE usuario SET activo = 0, fecha_eliminacion = ? WHERE id = ?')
+        .bind(now, userId),
+      c.env.DB
+        .prepare('UPDATE sesion SET revocada = 1 WHERE usuario_id = ?')
+        .bind(userId),
+    ]);
+    return ok(c, { message: 'Cuenta eliminada. Tienes 30 días para restaurarla en /api/auth/restore.' });
+  } catch {
+    return err(c, 'Error al eliminar la cuenta', 500);
+  }
+});
+
+router.post('/restore', async (c) => {
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json<Record<string, unknown>>();
+  } catch {
+    return err(c, 'Cuerpo JSON inválido', 400);
+  }
+
+  const { email, password } = body;
+  if (!email || typeof email !== 'string') return err(c, 'Email requerido', 400);
+  if (!password || typeof password !== 'string') return err(c, 'Contraseña requerida', 400);
+
+  try {
+    const usuario = await c.env.DB
+      .prepare('SELECT id, email, password_hash, rol, activo, fecha_eliminacion FROM usuario WHERE email = ?')
+      .bind(email.toLowerCase().trim())
+      .first<{ id: string; email: string; password_hash: string | null; rol: Rol; activo: 0 | 1; fecha_eliminacion: number | null }>();
+
+    const hashToVerify = usuario?.password_hash ?? DUMMY_HASH;
+    const valid = await verifyPassword(password, hashToVerify);
+
+    if (!usuario || !usuario.password_hash || !valid) {
+      return err(c, 'Credenciales inválidas', 401);
+    }
+    if (usuario.activo === 1) {
+      return err(c, 'La cuenta está activa, no necesita restauración', 400);
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const TREINTA_DIAS = 30 * 24 * 60 * 60;
+    if (!usuario.fecha_eliminacion || now - usuario.fecha_eliminacion > TREINTA_DIAS) {
+      return err(c, 'El período de gracia de 30 días ha expirado', 400);
+    }
+
+    const sesionId = crypto.randomUUID();
+    const ip = c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For') ?? null;
+    const userAgent = c.req.header('User-Agent') ?? null;
+
+    await c.env.DB.batch([
+      c.env.DB
+        .prepare('UPDATE usuario SET activo = 1, fecha_eliminacion = NULL, ultima_sesion = ? WHERE id = ?')
+        .bind(now, usuario.id),
+      c.env.DB
+        .prepare(
+          `INSERT INTO sesion (id, usuario_id, user_agent, ip, plataforma, fecha_creacion, fecha_expiracion, revocada)
+           VALUES (?, ?, ?, ?, 'WEB', ?, ?, 0)`,
+        )
+        .bind(sesionId, usuario.id, userAgent, ip, now, now + REFRESH_TTL),
+    ]);
+
+    const [accessToken, refreshToken] = await Promise.all([
+      signAccess(usuario.id, usuario.rol, sesionId, c.env.JWT_SECRET),
+      signRefresh(usuario.id, sesionId, c.env.JWT_SECRET),
+    ]);
+
+    return ok(c, {
+      message: 'Cuenta restaurada correctamente',
+      accessToken,
+      refreshToken,
+      user: { id: usuario.id, email: usuario.email, rol: usuario.rol },
+    });
+  } catch {
+    return err(c, 'Error al restaurar la cuenta', 500);
+  }
+});
+
+router.post('/onboarding', authMiddleware, async (c) => {
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json<Record<string, unknown>>();
+  } catch {
+    return err(c, 'Cuerpo JSON inválido', 400);
+  }
+
+  const { rol, nombre } = body;
+  if (!rol || !ROLES_REGISTRABLES.includes(rol as Rol)) {
+    return err(c, `rol debe ser EMPRESA o TECNICO`, 400);
+  }
+  if (!nombre || typeof nombre !== 'string' || !nombre.trim()) {
+    return err(c, 'nombre requerido', 400);
+  }
+
+  const userId = c.get('userId');
+  const rolValue = rol as Rol;
+  const nombreTrim = (nombre as string).trim();
+
+  try {
+    if (rolValue === 'TECNICO') {
+      await c.env.DB.batch([
+        c.env.DB.prepare('UPDATE usuario SET rol = ? WHERE id = ?').bind('TECNICO', userId),
+        c.env.DB.prepare(
+          'INSERT INTO perfil_tecnico (usuario_id, nombre_completo) VALUES (?, ?) ON CONFLICT(usuario_id) DO UPDATE SET nombre_completo = excluded.nombre_completo',
+        ).bind(userId, nombreTrim),
+      ]);
+    } else {
+      await c.env.DB.batch([
+        c.env.DB.prepare('UPDATE usuario SET rol = ? WHERE id = ?').bind('EMPRESA', userId),
+        c.env.DB.prepare('DELETE FROM perfil_tecnico WHERE usuario_id = ?').bind(userId),
+        c.env.DB.prepare(
+          'INSERT INTO perfil_empresa (usuario_id, razon_social) VALUES (?, ?) ON CONFLICT(usuario_id) DO UPDATE SET razon_social = excluded.razon_social',
+        ).bind(userId, nombreTrim),
+      ]);
+    }
+
+    const sesionId = c.get('sesionId');
+    const newAccessToken = await signAccess(userId, rolValue, sesionId, c.env.JWT_SECRET);
+
+    return ok(c, { accessToken: newAccessToken, rol: rolValue });
+  } catch {
+    return err(c, 'Error al completar el perfil', 500);
   }
 });
 

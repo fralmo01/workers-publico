@@ -1,5 +1,3 @@
-// Actualiza o crea la fila en ranking_tecnico para un técnico dado.
-// Llamar tras: calificación nueva, favorito nuevo/eliminado, perfil actualizado.
 export async function syncRankingTecnico(db: D1Database, tecnicoId: string): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const dia30 = now - 30 * 24 * 3600;
@@ -27,28 +25,22 @@ export async function syncRankingTecnico(db: D1Database, tecnicoId: string): Pro
 
   const disponible = perfilRow.disponibilidad !== 'NO_DISPONIBLE' ? 1 : 0;
 
-  // score_calificacion: 0-1 normalizado sobre 5
   const scoreCalif = Math.min(perfilRow.calificacion_promedio / 5, 1);
 
-  // score_experiencia: basado en si tiene CV con entradas
   let scoreExp = 0;
   if (cvRow?.id) {
     const cntRes = await db.prepare(
       `SELECT (SELECT COUNT(*) FROM experiencia_cv WHERE cv_id = ?) + (SELECT COUNT(*) FROM educacion WHERE cv_id = ?) AS total`,
     ).bind(cvRow.id, cvRow.id).first<{ total: number }>();
-    scoreExp = Math.min((cntRes?.total ?? 0) / 5, 1); // máx 5 entradas = score 1.0
+    scoreExp = Math.min((cntRes?.total ?? 0) / 5, 1);
   }
 
-  // score_favoritos: normalizado (cap en 20)
   const scoreFav = Math.min((favRow?.n ?? 0) / 20, 1);
 
-  // boost_nuevo: 1.0 si se registró en los últimos 30 días
   const boostNuevo = (regRow?.fecha_registro ?? 0) >= dia30 ? 1.0 : 0.0;
 
-  // boost_recomendado: 1.0 si al menos una empresa lo recomendó
   const boostRec = (recRow?.n ?? 0) > 0 ? 1.0 : 0.0;
 
-  // score_final ponderado
   const scoreFinal =
     scoreCalif * 0.4 +
     scoreExp   * 0.2 +

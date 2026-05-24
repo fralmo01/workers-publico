@@ -39,6 +39,27 @@ async function geocodificar(
   }
 }
 
+async function reverseGeocodificar(
+  lat: number,
+  lng: number,
+): Promise<{ direccion: string; place_id: string } | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=es`,
+      { headers: { 'User-Agent': 'ProLink/1.0 (contact@prolink.pe)' } },
+    );
+    if (!res.ok) return null;
+    const data = await res.json() as { display_name?: string; place_id?: number };
+    if (!data.display_name) return null;
+    return {
+      direccion: data.display_name,
+      place_id: String(data.place_id ?? ''),
+    };
+  } catch {
+    return null;
+  }
+}
+
 router.get('/me', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const rol = c.get('rol');
@@ -118,7 +139,6 @@ router.on(['PUT', 'POST'], '/tecnico', authMiddleware, async (c) => {
     }
   }
 
-  // Geocodificar dirección si fue provista
   let lat: number | null = null;
   let lng: number | null = null;
   let place_id: string | null = null;
@@ -231,7 +251,48 @@ router.put('/empresa', authMiddleware, async (c) => {
   }
 });
 
-// Rutas públicas
+router.put('/ubicacion', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const rol = c.get('rol');
+  if (rol === 'ADMIN') return err(c, 'No aplica para ADMIN', 400);
+
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json<Record<string, unknown>>();
+  } catch {
+    return err(c, 'Cuerpo JSON inválido', 400);
+  }
+
+  const lat = typeof body.lat === 'number' ? body.lat : null;
+  const lng = typeof body.lng === 'number' ? body.lng : null;
+
+  if (lat === null || lng === null || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return err(c, 'lat y lng válidos son requeridos', 400);
+  }
+
+  try {
+    const geo = await reverseGeocodificar(lat, lng);
+    const direccion = geo?.direccion ?? null;
+    const place_id  = geo?.place_id  ?? null;
+
+    if (rol === 'TECNICO') {
+      await c.env.DB
+        .prepare('UPDATE perfil_tecnico SET lat = ?, lng = ?, direccion = ?, place_id = ? WHERE usuario_id = ?')
+        .bind(lat, lng, direccion, place_id, userId)
+        .run();
+    } else {
+      await c.env.DB
+        .prepare('UPDATE perfil_empresa SET lat = ?, lng = ?, direccion = ?, place_id = ? WHERE usuario_id = ?')
+        .bind(lat, lng, direccion, place_id, userId)
+        .run();
+    }
+
+    return ok(c, { lat, lng, direccion });
+  } catch {
+    return err(c, 'Error al guardar ubicación', 500);
+  }
+});
+
 router.get('/tecnico/:id', async (c) => {
   const id = c.req.param('id');
   try {

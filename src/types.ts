@@ -122,13 +122,11 @@ export interface RefreshPayload {
   exp: number;
 }
 
-// ── Fase 2: nuevos enums ────────────────────────────────────────────────────
 
 export type EstadoConvocatoria = 'ABIERTA' | 'EN_SELECCION' | 'CERRADA';
 export type EstadoColaboracion = 'EN_CURSO' | 'FINALIZADA' | 'CANCELADA';
 export type TipoFavorito = 'TECNICO_GUARDADO' | 'EMPRESA_GUARDADA';
 
-// ── Fase 2: nuevas entidades ─────────────────────────────────────────────────
 
 export interface Convocatoria {
   id: string;
@@ -237,7 +235,16 @@ export interface Certificado {
   url: string | null;
 }
 
-// ── Tipo central del app Hono — bindings explícitos, no depende del Env auto-generado
+export interface ProyectoTecnico {
+  id: string;
+  tecnico_id: string;
+  titulo: string;
+  descripcion: string | null;
+  portada_key: string | null;
+  url: string | null;
+  fecha_creacion: number;
+}
+
 export type HonoEnv = {
   Bindings: {
     DB: D1Database;
@@ -246,6 +253,7 @@ export type HonoEnv = {
     GOOGLE_CLIENT_ID: string;
     GOOGLE_CLIENT_SECRET: string;
     FRONTEND_URL: string;
+    WORKER_BASE_URL: string;
   };
   Variables: {
     userId: string;

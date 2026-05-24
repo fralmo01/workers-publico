@@ -1,6 +1,3 @@
-// PBKDF2 + SHA-256 usando Web Crypto API (no bcrypt — no disponible en Workers)
-// Formato almacenado: "iterations:saltB64url:hashB64url"
-
 const ITERATIONS = 100_000;
 const KEY_LEN_BITS = 256;
 

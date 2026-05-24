@@ -5,8 +5,6 @@ import { ok, err } from '../lib/responses';
 
 const ESTADOS: EstadoConvocatoria[] = ['ABIERTA', 'EN_SELECCION', 'CERRADA'];
 
-// Transiciones válidas desde cada estado.
-// ABIERTA → CERRADA se permite como cancelación directa (sin pasar por EN_SELECCION).
 const TRANSICIONES: Record<EstadoConvocatoria, EstadoConvocatoria[]> = {
   ABIERTA:      ['EN_SELECCION', 'CERRADA'],
   EN_SELECCION: ['ABIERTA', 'CERRADA'],
@@ -15,7 +13,6 @@ const TRANSICIONES: Record<EstadoConvocatoria, EstadoConvocatoria[]> = {
 
 const router = new Hono<HonoEnv>();
 
-// GET /api/convocatorias — lista de la empresa autenticada
 router.get('/', authMiddleware, async (c) => {
   if (c.get('rol') !== 'EMPRESA') return err(c, 'Solo empresas pueden listar sus convocatorias', 403);
   const userId = c.get('userId');
@@ -30,7 +27,6 @@ router.get('/', authMiddleware, async (c) => {
   }
 });
 
-// POST /api/convocatorias — crear (solo EMPRESA)
 router.post('/', authMiddleware, async (c) => {
   if (c.get('rol') !== 'EMPRESA') return err(c, 'Solo empresas pueden crear convocatorias', 403);
   const userId = c.get('userId');
@@ -109,14 +105,24 @@ router.post('/', authMiddleware, async (c) => {
   }
 });
 
-// GET /api/convocatorias/:id — detalle público
 router.get('/:id', async (c) => {
   const id = c.req.param('id');
   try {
     const conv = await c.env.DB
-      .prepare('SELECT * FROM convocatoria WHERE id = ?')
+      .prepare(
+        `SELECT c.*,
+                pe.razon_social, pe.logo_key, pe.descripcion AS empresa_descripcion,
+                pe.sector AS empresa_sector, pe.sitio_web AS empresa_sitio_web,
+                pe.calificacion_promedio AS empresa_calificacion,
+                pe.total_calificaciones AS empresa_total_calificaciones,
+                pe.direccion AS empresa_direccion,
+                pe.usuario_id AS empresa_usuario_id
+         FROM convocatoria c
+         INNER JOIN perfil_empresa pe ON pe.usuario_id = c.empresa_id
+         WHERE c.id = ?`,
+      )
       .bind(id)
-      .first<Convocatoria>();
+      .first<Record<string, unknown>>();
     if (!conv) return err(c, 'Convocatoria no encontrada', 404);
     return ok(c, conv);
   } catch {
@@ -124,7 +130,6 @@ router.get('/:id', async (c) => {
   }
 });
 
-// PUT /api/convocatorias/:id — editar (empresa dueña; no editable si CERRADA)
 router.put('/:id', authMiddleware, async (c) => {
   if (c.get('rol') !== 'EMPRESA') return err(c, 'Solo empresas pueden editar convocatorias', 403);
   const userId = c.get('userId');
@@ -208,7 +213,6 @@ router.put('/:id', authMiddleware, async (c) => {
   }
 });
 
-// PATCH /api/convocatorias/:id/estado — cambiar estado (empresa dueña)
 router.patch('/:id/estado', authMiddleware, async (c) => {
   if (c.get('rol') !== 'EMPRESA') return err(c, 'Solo empresas pueden cambiar el estado', 403);
   const userId = c.get('userId');
@@ -251,7 +255,6 @@ router.patch('/:id/estado', authMiddleware, async (c) => {
   }
 });
 
-// DELETE /api/convocatorias/:id — solo si ABIERTA y sin colaboraciones
 router.delete('/:id', authMiddleware, async (c) => {
   if (c.get('rol') !== 'EMPRESA') return err(c, 'Solo empresas pueden eliminar convocatorias', 403);
   const userId = c.get('userId');
@@ -286,7 +289,6 @@ router.delete('/:id', authMiddleware, async (c) => {
   }
 });
 
-// POST /api/convocatorias/:id/postulaciones — técnico postula a la convocatoria
 router.post('/:id/postulaciones', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden postular', 403);
   const tecnicoId = c.get('userId');
@@ -300,12 +302,13 @@ router.post('/:id/postulaciones', authMiddleware, async (c) => {
 
   try {
     const conv = await c.env.DB
-      .prepare("SELECT id, estado FROM convocatoria WHERE id = ?")
+      .prepare('SELECT id, estado, plazas_disponibles, plazas_ocupadas FROM convocatoria WHERE id = ?')
       .bind(convId)
-      .first<{ id: string; estado: string }>();
+      .first<{ id: string; estado: string; plazas_disponibles: number; plazas_ocupadas: number }>();
 
     if (!conv) return err(c, 'Convocatoria no encontrada', 404);
     if (conv.estado === 'CERRADA') return err(c, 'La convocatoria está cerrada', 400);
+    if (conv.plazas_ocupadas >= conv.plazas_disponibles) return err(c, 'No hay plazas disponibles', 400);
 
     const existing = await c.env.DB
       .prepare('SELECT id FROM postulacion WHERE convocatoria_id = ? AND tecnico_id = ?')
@@ -317,13 +320,17 @@ router.post('/:id/postulaciones', authMiddleware, async (c) => {
     const id = crypto.randomUUID();
     const now = Math.floor(Date.now() / 1000);
 
-    await c.env.DB
-      .prepare(
-        `INSERT INTO postulacion (id, convocatoria_id, tecnico_id, estado, mensaje, fecha_creacion)
-         VALUES (?, ?, ?, 'PENDIENTE', ?, ?)`,
-      )
-      .bind(id, convId, tecnicoId, mensaje, now)
-      .run();
+    await c.env.DB.batch([
+      c.env.DB
+        .prepare(
+          `INSERT INTO postulacion (id, convocatoria_id, tecnico_id, estado, mensaje, fecha_creacion)
+           VALUES (?, ?, ?, 'PENDIENTE', ?, ?)`,
+        )
+        .bind(id, convId, tecnicoId, mensaje, now),
+      c.env.DB
+        .prepare('UPDATE convocatoria SET plazas_ocupadas = plazas_ocupadas + 1 WHERE id = ?')
+        .bind(convId),
+    ]);
 
     const created = await c.env.DB
       .prepare('SELECT * FROM postulacion WHERE id = ?')
@@ -336,7 +343,6 @@ router.post('/:id/postulaciones', authMiddleware, async (c) => {
   }
 });
 
-// GET /api/convocatorias/:id/postulaciones — empresa lista las postulaciones de su convocatoria
 router.get('/:id/postulaciones', authMiddleware, async (c) => {
   if (c.get('rol') !== 'EMPRESA') return err(c, 'Solo empresas pueden ver las postulaciones', 403);
   const empresaId = c.get('userId');

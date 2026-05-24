@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS usuario (
     fecha_registro  INTEGER NOT NULL,
     ultima_sesion   INTEGER,
     activo          INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0, 1)),
-    email_verificado INTEGER NOT NULL DEFAULT 0 CHECK (email_verificado IN (0, 1))
+    email_verificado INTEGER NOT NULL DEFAULT 0 CHECK (email_verificado IN (0, 1)),
+    fecha_eliminacion INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_usuario_rol ON usuario(rol, activo);

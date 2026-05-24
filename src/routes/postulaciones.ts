@@ -7,7 +7,6 @@ const ESTADOS_VALIDOS: EstadoPostulacion[] = ['PENDIENTE', 'ACEPTADA', 'RECHAZAD
 
 const router = new Hono<HonoEnv>();
 
-// GET /api/postulaciones/mis-postulaciones — técnico ve sus postulaciones con info de convocatoria
 router.get('/mis-postulaciones', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden ver sus postulaciones', 403);
   const tecnicoId = c.get('userId');
@@ -32,7 +31,6 @@ router.get('/mis-postulaciones', authMiddleware, async (c) => {
   }
 });
 
-// GET /api/postulaciones/mi-estado?convocatoria_id=xxx — estado de la postulación del técnico
 router.get('/mi-estado', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden consultar su estado', 403);
   const tecnicoId = c.get('userId');
@@ -52,7 +50,6 @@ router.get('/mi-estado', authMiddleware, async (c) => {
   }
 });
 
-// PATCH /api/postulaciones/:id/estado — empresa acepta o rechaza
 router.patch('/:id/estado', authMiddleware, async (c) => {
   if (c.get('rol') !== 'EMPRESA') return err(c, 'Solo empresas pueden gestionar postulaciones', 403);
   const empresaId = c.get('userId');
@@ -101,19 +98,17 @@ router.patch('/:id/estado', authMiddleware, async (c) => {
              VALUES (?, ?, ?, ?, 'EN_CURSO', ?, ?)`,
           )
           .bind(colaboracionId, post.convocatoria_id, post.tecnico_id, empresaId, now, now),
-        c.env.DB
-          .prepare('UPDATE convocatoria SET plazas_ocupadas = plazas_ocupadas + 1 WHERE id = ?')
-          .bind(post.convocatoria_id),
       ]);
 
       return ok(c, { id: postId, estado: 'ACEPTADA', colaboracion_id: colaboracionId });
     }
 
-    // RECHAZADA
-    await c.env.DB
-      .prepare('UPDATE postulacion SET estado = ? WHERE id = ?')
-      .bind('RECHAZADA', postId)
-      .run();
+    await c.env.DB.batch([
+      c.env.DB.prepare('UPDATE postulacion SET estado = ? WHERE id = ?').bind('RECHAZADA', postId),
+      c.env.DB
+        .prepare('UPDATE convocatoria SET plazas_ocupadas = MAX(0, plazas_ocupadas - 1) WHERE id = ?')
+        .bind(post.convocatoria_id),
+    ]);
 
     return ok(c, { id: postId, estado: 'RECHAZADA' });
   } catch {

@@ -37,14 +37,12 @@ async function getCVData(db: D1Database, cvId: string) {
   };
 }
 
-// GET /api/cv/mio — CV completo del técnico autenticado
 router.get('/mio', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos tienen CV', 403);
   const tecnicoId = c.get('userId');
   try {
     const cv = await getOrCreateCV(c.env.DB, tecnicoId);
 
-    // Habilidades del técnico
     const habRes = await c.env.DB
       .prepare(
         `SELECT h.id, h.nombre, h.categoria_id FROM habilidad h
@@ -61,7 +59,6 @@ router.get('/mio', authMiddleware, async (c) => {
   }
 });
 
-// GET /api/cv/:tecnicoId — CV público de un técnico
 router.get('/:tecnicoId', async (c) => {
   const tecnicoId = c.req.param('tecnicoId');
   try {
@@ -90,7 +87,6 @@ router.get('/:tecnicoId', async (c) => {
   }
 });
 
-// PUT /api/cv/habilidades — reemplaza las habilidades del técnico
 router.put('/habilidades', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden modificar habilidades', 403);
   const tecnicoId = c.get('userId');
@@ -125,7 +121,6 @@ router.put('/habilidades', authMiddleware, async (c) => {
   }
 });
 
-// POST /api/cv/experiencia — agregar experiencia
 router.post('/experiencia', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden editar su CV', 403);
   const tecnicoId = c.get('userId');
@@ -168,7 +163,6 @@ router.post('/experiencia', authMiddleware, async (c) => {
   }
 });
 
-// PUT /api/cv/experiencia/:id — actualizar experiencia
 router.put('/experiencia/:id', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden editar su CV', 403);
   const tecnicoId = c.get('userId');
@@ -212,7 +206,6 @@ router.put('/experiencia/:id', authMiddleware, async (c) => {
   }
 });
 
-// DELETE /api/cv/experiencia/:id
 router.delete('/experiencia/:id', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden editar su CV', 403);
   const tecnicoId = c.get('userId');
@@ -232,7 +225,6 @@ router.delete('/experiencia/:id', authMiddleware, async (c) => {
   }
 });
 
-// POST /api/cv/educacion
 router.post('/educacion', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden editar su CV', 403);
   const tecnicoId = c.get('userId');
@@ -263,7 +255,6 @@ router.post('/educacion', authMiddleware, async (c) => {
   }
 });
 
-// PUT /api/cv/educacion/:id
 router.put('/educacion/:id', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden editar su CV', 403);
   const tecnicoId = c.get('userId');
@@ -299,7 +290,6 @@ router.put('/educacion/:id', authMiddleware, async (c) => {
   }
 });
 
-// DELETE /api/cv/educacion/:id
 router.delete('/educacion/:id', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden editar su CV', 403);
   const tecnicoId = c.get('userId');
@@ -318,7 +308,6 @@ router.delete('/educacion/:id', authMiddleware, async (c) => {
   }
 });
 
-// POST /api/cv/certificado
 router.post('/certificado', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden editar su CV', 403);
   const tecnicoId = c.get('userId');
@@ -351,7 +340,6 @@ router.post('/certificado', authMiddleware, async (c) => {
   }
 });
 
-// PUT /api/cv/certificado/:id
 router.put('/certificado/:id', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden editar su CV', 403);
   const tecnicoId = c.get('userId');
@@ -388,7 +376,6 @@ router.put('/certificado/:id', authMiddleware, async (c) => {
   }
 });
 
-// DELETE /api/cv/certificado/:id
 router.delete('/certificado/:id', authMiddleware, async (c) => {
   if (c.get('rol') !== 'TECNICO') return err(c, 'Solo técnicos pueden editar su CV', 403);
   const tecnicoId = c.get('userId');

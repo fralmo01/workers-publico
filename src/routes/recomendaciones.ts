@@ -4,8 +4,6 @@ import { authMiddleware } from '../middleware/auth';
 import { ok, err } from '../lib/responses';
 
 const router = new Hono<HonoEnv>();
-
-// POST /api/recomendaciones — empresa marca técnico como recomendado (idempotente)
 router.post('/', authMiddleware, async (c) => {
   if (c.get('rol') !== 'EMPRESA') return err(c, 'Solo empresas pueden recomendar técnicos', 403);
   const userId = c.get('userId');
@@ -36,7 +34,6 @@ router.post('/', authMiddleware, async (c) => {
       .bind(userId, tecnico_id, now)
       .run();
 
-    // result.meta.changes = 0 → ya existía (idempotente)
     const status = result.meta.changes > 0 ? 201 : 200;
     const rec = await c.env.DB
       .prepare('SELECT * FROM recomendacion_empresa WHERE empresa_id = ? AND tecnico_id = ?')
@@ -49,7 +46,6 @@ router.post('/', authMiddleware, async (c) => {
   }
 });
 
-// DELETE /api/recomendaciones/:tecnico_id — quitar recomendación (solo la empresa que la hizo)
 router.delete('/:tecnico_id', authMiddleware, async (c) => {
   if (c.get('rol') !== 'EMPRESA') return err(c, 'Solo empresas pueden quitar recomendaciones', 403);
   const userId = c.get('userId');

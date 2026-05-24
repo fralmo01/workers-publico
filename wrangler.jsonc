@@ -33,7 +33,8 @@
 	// Para local: añadir GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET y FRONTEND_URL en .dev.vars
 	// JWT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET → wrangler secret put <name>
 	"vars": {
-		"FRONTEND_URL": "http://localhost:5173"
+		"FRONTEND_URL": "http://localhost:5173",
+		"WORKER_BASE_URL": "http://localhost:8787"
 	}
 	/**
 	 * Smart Placement

@@ -1,10 +1,8 @@
-// JWT HMAC-SHA256 con Web Crypto API (sin dependencias externas)
 import type { JWTPayload, RefreshPayload, Rol } from '../types';
 
 export const ACCESS_TTL = 15 * 60;          // 15 min
 export const REFRESH_TTL = 30 * 24 * 3600;  // 30 días
 
-// El header es constante para HS256
 const HEADER_B64 = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
   .replace(/\+/g, '-')
   .replace(/\//g, '_')

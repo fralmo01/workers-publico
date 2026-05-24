@@ -5,7 +5,6 @@ import { ok, err } from '../lib/responses';
 
 const router = new Hono<HonoEnv>();
 
-// GET /api/favoritos — listar los favoritos del usuario autenticado
 router.get('/', authMiddleware, async (c) => {
   const userId = c.get('userId');
   try {
@@ -19,7 +18,6 @@ router.get('/', authMiddleware, async (c) => {
   }
 });
 
-// POST /api/favoritos — guardar favorito
 router.post('/', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const rol = c.get('rol');
@@ -44,7 +42,6 @@ router.post('/', authMiddleware, async (c) => {
     return err(c, 'tipo es requerido', 400);
   }
 
-  // Validar que tipo coincide con el rol
   if (rol === 'EMPRESA' && tipo !== 'TECNICO_GUARDADO') {
     return err(c, 'Las empresas solo pueden guardar técnicos (tipo: TECNICO_GUARDADO)', 400);
   }
@@ -55,7 +52,6 @@ router.post('/', authMiddleware, async (c) => {
   const tipoValor = tipo as TipoFavorito;
 
   try {
-    // Verificar que el objetivo tiene el perfil correcto (empresa ↔ tecnico)
     const objetivoExiste = tipoValor === 'TECNICO_GUARDADO'
       ? await c.env.DB
           .prepare('SELECT usuario_id FROM perfil_tecnico WHERE usuario_id = ?')
@@ -79,7 +75,6 @@ router.post('/', authMiddleware, async (c) => {
         .bind(id, userId, objetivo_id, tipoValor, now)
         .run();
     } catch (e) {
-      // UNIQUE constraint: (usuario_id, objetivo_id, tipo) ya existe
       const msg = e instanceof Error ? e.message : '';
       if (msg.includes('UNIQUE') || msg.includes('unique')) {
         return err(c, 'Ya guardaste este favorito', 409);
@@ -102,7 +97,6 @@ router.post('/', authMiddleware, async (c) => {
   }
 });
 
-// DELETE /api/favoritos/:id — quitar favorito (solo el dueño)
 router.delete('/:id', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const id = c.req.param('id');

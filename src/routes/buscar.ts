@@ -12,20 +12,14 @@ const DEFAULT_LIMIT = 20;
 
 const router = new Hono<HonoEnv>();
 
-// GET /api/buscar/tecnicos
-// Búsqueda pública de técnicos con filtros acumulativos.
-// habilidades: AND lógico — el técnico debe tener TODAS las habilidades listadas (separadas por coma).
-// TODO Fase 5: reemplazar ORDER BY calificacion_promedio por ranking_tecnico.score_final
 router.get('/tecnicos', async (c) => {
   const q = c.req.query.bind(c.req);
 
-  // Parsear y validar paginación
   const rawLimit = parseInt(q('limit') ?? '', 10);
   const rawOffset = parseInt(q('offset') ?? '', 10);
   const limit = Number.isNaN(rawLimit) ? DEFAULT_LIMIT : Math.min(Math.max(rawLimit, 1), MAX_LIMIT);
   const offset = Number.isNaN(rawOffset) ? 0 : Math.max(rawOffset, 0);
 
-  // Filtros opcionales
   const categoria = q('categoria') ?? null;
   const nivelParam = q('nivel') ?? null;
   const dispParam = q('disponibilidad') ?? null;
@@ -53,7 +47,6 @@ router.get('/tecnicos', async (c) => {
     ? habilidadesParam.split(',').map((h) => h.trim()).filter(Boolean)
     : [];
 
-  // Filtro de distancia (bounding box sobre lat/lng del técnico)
   const latParam  = q('lat')      ?? null;
   const lngParam  = q('lng')      ?? null;
   const radioParam = q('radio_km') ?? null;
@@ -88,7 +81,6 @@ router.get('/tecnicos', async (c) => {
       bindings.push(calMin);
     }
 
-    // Filtro de habilidades: AND lógico usando subquery con HAVING COUNT
     if (habilidades.length > 0) {
       const placeholders = habilidades.map(() => '?').join(', ');
       conditions.push(
@@ -102,7 +94,6 @@ router.get('/tecnicos', async (c) => {
       bindings.push(...habilidades);
     }
 
-    // Bounding box distance filter (avoids trig functions not available in D1)
     if (usarDistancia) {
       const latDelta = radioKm! / 111;
       const lngDelta = radioKm! / (111 * Math.cos((latRef! * Math.PI) / 180));
@@ -123,11 +114,10 @@ router.get('/tecnicos', async (c) => {
           ? 'pt.total_colaboraciones DESC'
           : usarRanking
             ? 'COALESCE(rt.score_final, 0) DESC'
-            : 'pt.calificacion_promedio DESC'; // default: calificacion
+            : 'pt.calificacion_promedio DESC';
 
     const rankingJoin = usarRanking ? 'LEFT JOIN ranking_tecnico rt ON rt.tecnico_id = pt.usuario_id' : '';
 
-    // Query de datos (sin email de login; email_profesional solo si no es null)
     const dataSQL = `
       SELECT
         pt.usuario_id,
@@ -158,7 +148,6 @@ router.get('/tecnicos', async (c) => {
       LIMIT ? OFFSET ?
     `;
 
-    // Query de total (para paginación)
     const countSQL = `
       SELECT COUNT(*) AS total
       FROM perfil_tecnico pt
@@ -183,9 +172,6 @@ router.get('/tecnicos', async (c) => {
   }
 });
 
-// GET /api/buscar/convocatorias
-// Búsqueda pública de convocatorias con filtros.
-// Filtro distrito: aplica sobre la ubicación de la empresa publicante.
 router.get('/convocatorias', async (c) => {
   const q = c.req.query.bind(c.req);
 
@@ -206,8 +192,17 @@ router.get('/convocatorias', async (c) => {
     return err(c, `orden debe ser uno de: ${ORDENES_CONV.join(', ')}`, 400);
   }
 
+  const latParam2   = c.req.query('lat')      ?? null;
+  const lngParam2   = c.req.query('lng')      ?? null;
+  const radioParam2 = c.req.query('radio_km') ?? null;
+  const latRef2   = latParam2   !== null ? parseFloat(latParam2)   : null;
+  const lngRef2   = lngParam2   !== null ? parseFloat(lngParam2)   : null;
+  const radioKm2  = radioParam2 !== null ? parseFloat(radioParam2) : null;
+  const usarDistancia2 = latRef2 !== null && lngRef2 !== null && radioKm2 !== null
+    && !Number.isNaN(latRef2) && !Number.isNaN(lngRef2) && !Number.isNaN(radioKm2) && radioKm2 > 0;
+
   try {
-    const conditions: string[] = ['c.estado = ?'];
+    const conditions: string[] = ['c.estado = ?', 'u_emp.activo = 1'];
     const bindings: (string | number)[] = [estadoParam];
 
     if (categoria) {
@@ -215,20 +210,31 @@ router.get('/convocatorias', async (c) => {
       bindings.push(categoria);
     }
     if (distrito) {
-      // Filtrar por distrito de la empresa dueña de la convocatoria
       conditions.push('pe.distrito_id = ?');
       bindings.push(distrito);
+    }
+    if (usarDistancia2) {
+      const latDelta = radioKm2! / 111;
+      const lngDelta = radioKm2! / (111 * Math.cos((latRef2! * Math.PI) / 180));
+      conditions.push('pe.lat IS NOT NULL AND pe.lng IS NOT NULL');
+      conditions.push('pe.lat BETWEEN ? AND ?');
+      bindings.push(latRef2! - latDelta, latRef2! + latDelta);
+      conditions.push('pe.lng BETWEEN ? AND ?');
+      bindings.push(lngRef2! - lngDelta, lngRef2! + lngDelta);
     }
 
     const where = `WHERE ${conditions.join(' AND ')}`;
     const orderBy = orden === 'plazas' ? '(c.plazas_disponibles - c.plazas_ocupadas) DESC' : 'c.fecha_creacion DESC';
 
-    const join = distrito ? 'INNER JOIN perfil_empresa pe ON pe.usuario_id = c.empresa_id' : '';
-
     const dataSQL = `
-      SELECT c.*
+      SELECT c.*,
+             pe.razon_social, pe.logo_key, pe.descripcion AS empresa_descripcion,
+             pe.distrito_id AS empresa_distrito_id,
+             pe.lat AS empresa_lat, pe.lng AS empresa_lng, pe.direccion AS empresa_direccion,
+             pe.usuario_id AS empresa_usuario_id
       FROM convocatoria c
-      ${join}
+      INNER JOIN perfil_empresa pe ON pe.usuario_id = c.empresa_id
+      INNER JOIN usuario u_emp ON u_emp.id = c.empresa_id
       ${where}
       ORDER BY ${orderBy}
       LIMIT ? OFFSET ?
@@ -237,7 +243,8 @@ router.get('/convocatorias', async (c) => {
     const countSQL = `
       SELECT COUNT(*) AS total
       FROM convocatoria c
-      ${join}
+      INNER JOIN perfil_empresa pe ON pe.usuario_id = c.empresa_id
+      INNER JOIN usuario u_emp ON u_emp.id = c.empresa_id
       ${where}
     `;
 

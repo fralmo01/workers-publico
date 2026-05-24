@@ -12,7 +12,6 @@ export const authMiddleware: MiddlewareHandler<HonoEnv> = async (c, next) => {
   try {
     const payload = await verifyAccess(token, c.env.JWT_SECRET);
 
-    // Una sola consulta: verifica sesión no revocada Y usuario activo
     const row = await c.env.DB
       .prepare(
         'SELECT s.revocada, u.activo FROM sesion s INNER JOIN usuario u ON u.id = s.usuario_id WHERE s.id = ?',
